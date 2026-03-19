@@ -1,4 +1,12 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from dotenv import load_dotenv
+import os
+load_dotenv()
+os.environ["HF_TOKEN"] = os.getenv("HF_TOKEN")
+
+import torch
+print(f"PyTorch 版本: {torch.__version__}")
+print(f"是否可以使用 Metal (苹果显卡加速): {torch.backends.mps.is_available()}")
 
 # 加载预训练模型
 model_name = "Qwen/Qwen3-0.6B"
@@ -11,6 +19,9 @@ question = """Natalia sold clips to 48 of her friends in April, and then she sol
 # 构造输入
 prompt = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
 inputs = tokenizer(prompt, return_tensors="pt")
+
+print(inputs)
+print(type(inputs))
 
 # 生成回答
 outputs = model.generate(**inputs, max_new_tokens=200)

@@ -5,6 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "deepagents>=0.4.10",
+    "hello-agents[rl]==0.2.5",
+    "langchain-daytona>=0.0.4",
+    "openai>=1.109.1",
+    "pymupdf>=1.27.2",
+    "pypdf>=6.9.1",
+    "python-dotenv>=1.2.2",
     "torch>=2.10.0",
     "transformers>=5.3.0",
 ]
