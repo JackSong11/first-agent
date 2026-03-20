@@ -8,6 +8,7 @@ dependencies = [
     "deepagents>=0.4.10",
     "hello-agents[rl]==0.2.5",
     "langchain-daytona>=0.0.4",
+    "langsmith>=0.7.16",
     "openai>=1.109.1",
     "pymupdf>=1.27.2",
     "pypdf>=6.9.1",
