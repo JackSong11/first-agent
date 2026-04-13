@@ -29,7 +29,7 @@ def relu_grad(x):
 
 
 def softmax(x):
-    x = x - np.max(x, axis=-1, keepdims=True)   # オーバーフロー対策
+    x = x - np.max(x, axis=-1, keepdims=True)   # 防止溢出
     return np.exp(x) / np.sum(np.exp(x), axis=-1, keepdims=True)
 
 
@@ -38,11 +38,12 @@ def sum_squared_error(y, t):
 
 
 def cross_entropy_error(y, t):
+    # 把"一排数据"强制变成"一行矩阵"。如果输入是1维数组的时候，统一都变成二维矩阵处理。这样无论你传入的是一个样本还是一百个样本，函数内部都可以统一把它们当成矩阵来处理。
     if y.ndim == 1:
         t = t.reshape(1, t.size)
         y = y.reshape(1, y.size)
 
-    # 教師データがone-hot-vectorの場合、正解ラベルのインデックスに変換
+    # 如果训练数据是one-hot向量，则将其转换为正确标签的索引。
     if t.size == y.size:
         t = t.argmax(axis=1)
 
