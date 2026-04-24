@@ -1,19 +1,7 @@
-from importlib.metadata import version
-
-pkgs = [
-    "matplotlib",  # 绘图库
-    "tiktoken",  # 分词器
-    "torch",  # 深度学习库
-    "tqdm",  # 进度条
-    # "tensorflow",  # 用于加载OpenAI的预训练权重
-]
-for p in pkgs:
-    print(f"{p} version: {version(p)}")
-
 import json
-import os
 import urllib
 import urllib.request  # 修改这里
+import os
 
 
 def download_and_load_file(file_path, url):
@@ -41,10 +29,7 @@ url = (
 )
 
 data = download_and_load_file(file_path, url)
-print("Number of entries:", len(data))
 
-
-# 看一下数据一共有多少条
 
 def format_input(entry):
     # 使用数据库的提示词
@@ -60,16 +45,6 @@ def format_input(entry):
     return instruction_text + input_text
 
 
-model_input = format_input(data[50])
-desired_response = f"\n\n### Response:\n{data[50]['output']}"
-# 先使用五十条数据进行测试
-print(model_input + desired_response)
-
-model_input = format_input(data[999])
-desired_response = f"\n\n### Response:\n{data[999]['output']}"
-
-print(model_input + desired_response)
-
 # 自定义训练集、测试集和验证集的大小
 train_portion = int(len(data) * 0.85)  # 85% 作为训练集
 test_portion = int(len(data) * 0.1)  # 10% 作为测试集
@@ -80,11 +55,9 @@ train_data = data[:train_portion]
 test_data = data[train_portion:train_portion + test_portion]
 val_data = data[train_portion + test_portion:]
 
-print("Training set length:", len(train_data))
-print("Validation set length:", len(val_data))
-print("Test set length:", len(test_data))
-
 import torch
+
+torch.set_num_threads(1)  # 限制单线程，排除多线程竞争导致的数值错误
 from torch.utils.data import Dataset
 
 
@@ -112,87 +85,29 @@ class InstructionDataset(Dataset):
 
 
 import tiktoken
+from importlib.metadata import version
+
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# allowed model names
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import os
+
+# 1. 指定模型名称
+# model_name = "openai-community/gpt2"
+model_name = "openai-community/gpt2-medium"
+hf_token = os.getenv("HF_TOKEN")
+# 2. 加载预训练权重和模型结构
+# GPT2LMHeadModel 包含了预测下一个词所需的线性输出层
+model = GPT2LMHeadModel.from_pretrained(model_name)
+model = model.float()
+# 3. 加载对应的分词器
+tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+print(f"Model vocab size: {model.config.vocab_size}")
+print(f"Tokenizer vocab size: {len(tokenizer)}")
 
 # gpt2作为编码模型
-tokenizer = tiktoken.get_encoding("gpt2")
+# tokenizer = tiktoken.get_encoding("gpt2")
 print(tokenizer.encode("<|endoftext|>", allowed_special={"<|endoftext|>"}))
-
-
-def custom_collate_draft_1(
-        batch,
-        pad_token_id=50256,
-        device="cpu"
-):
-    # 找到批次中最长的序列
-    # 并将最大长度增加1，这样会在后面添加一个额外的填充 token
-    batch_max_length = max(len(item) + 1 for item in batch)
-
-    inputs_lst = []
-    # 准备输入
-    for item in batch:
-        new_item = item.copy()
-        new_item += [pad_token_id]
-        # 复制后进行填充
-        padded = (
-                new_item + [pad_token_id] *
-                (batch_max_length - len(new_item))
-        )
-        # 去掉最后一个表示并保存
-        inputs = torch.tensor(padded[:-1])
-
-        inputs_lst.append(inputs)
-    # 堆积起来并输送给gpu
-    inputs_tensor = torch.stack(inputs_lst).to(device)
-
-    return inputs_tensor
-
-
-inputs_1 = [0, 1, 2, 3, 4]
-inputs_2 = [5, 6]
-inputs_3 = [7, 8, 9]
-
-batch = (
-    inputs_1,
-    inputs_2,
-    inputs_3
-)
-
-print(custom_collate_draft_1(batch))
-
-
-def custom_collate_draft_2(
-        batch,
-        pad_token_id=50256,
-        device="cpu"
-):
-    # 找到最大的序列长度
-    batch_max_length = max(len(item) + 1 for item in batch)
-    # 准备一个空列表
-    inputs_lst, targets_lst = [], []
-
-    for item in batch:
-        new_item = item.copy()
-        new_item += [pad_token_id]
-        padded = (
-                new_item + [pad_token_id] *
-                (batch_max_length - len(new_item))
-        )
-        # 输入值是第一个到倒数第二个
-        inputs = torch.tensor(padded[:-1])
-        # 目标值是第二个到最后一个，这样子保证了长度一样
-        targets = torch.tensor(padded[1:])
-
-        inputs_lst.append(inputs)
-        targets_lst.append(targets)
-
-    inputs_tensor = torch.stack(inputs_lst).to(device)
-    targets_tensor = torch.stack(targets_lst).to(device)
-    return inputs_tensor, targets_tensor
-
-
-inputs, targets = custom_collate_draft_2(batch)
-print(inputs)
-print(targets)
 
 
 def custom_collate_fn(
@@ -222,6 +137,7 @@ def custom_collate_fn(
 
         # 新增：将目标中除了第一个填充 token 外的所有填充 token 替换为 ignore_index
         mask = targets == pad_token_id
+
         indices = torch.nonzero(mask).squeeze()
         if indices.numel() > 1:
             targets[indices[1:]] = ignore_index
@@ -241,52 +157,13 @@ def custom_collate_fn(
     return inputs_tensor, targets_tensor
 
 
-inputs, targets = custom_collate_fn(batch)
-print(inputs)
-print(targets)
-
-logits_1 = torch.tensor(
-    [[-1.0, 1.0],  # 1st training example
-     [-0.5, 1.5]]  # 2nd training example
-)
-# 两个训练的实例
-targets_1 = torch.tensor([0, 1])
-
-loss_1 = torch.nn.functional.cross_entropy(logits_1, targets_1)
-# 计算交叉熵
-print(loss_1)
-
-logits_2 = torch.tensor(
-    [[-1.0, 1.0],
-     [-0.5, 1.5],
-     [-0.5, 1.5]]  # 新增第3个训练实例
-)
-targets_2 = torch.tensor([0, 1, 1])
-
-loss_2 = torch.nn.functional.cross_entropy(logits_2, targets_2)
-print(loss_2)
-
-targets_3 = torch.tensor([0, 1, -100])
-
-loss_3 = torch.nn.functional.cross_entropy(logits_2, targets_3)
-print(loss_3)
-print("loss_1 == loss_3:", loss_1 == loss_3)
-# 综上所述、交叉熵会忽略-100
-
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# 注意：
-# 如果适用，取消注释以下行将使代码能够在Apple Silicon芯片上运行，
-# 这比在Apple CPU上运行要快得多（在M3 MacBook Air上测得）。
-# 然而，计算得到的loss可能会略有不同。
-
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-elif torch.backends.mps.is_available():
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
-
+# if torch.cuda.is_available():
+#     device = torch.device("cuda")
+# elif torch.backends.mps.is_available():
+#     device = torch.device("mps")
+# else:
+#     device = torch.device("cpu")
+device = torch.device("cpu")
 print("Device:", device)
 
 from functools import partial
@@ -336,32 +213,30 @@ test_loader = DataLoader(
     num_workers=num_workers
 )
 
-print("Train loader:")
-for inputs, targets in train_loader:
-    print(inputs.shape, targets.shape)
 
-print(inputs[0])
+#
+# print("Train loader:")
+# for inputs, targets in train_loader:
+#     print(inputs.shape, targets.shape)
+#
+# print(inputs[0])
+#
+# print(targets[0])
 
-print(targets[0])
 
-from importlib.metadata import version
-import torch
+def verify_model_health(model):
+    print("开始深度验证模型权重...")
+    for name, param in model.named_parameters():
+        if torch.isnan(param).any():
+            print(f"❌ {name} 包含 NaN")
+        if torch.isinf(param).any():
+            print(f"❌ {name} 包含 Inf")
+        if param.abs().max() > 1e6:  # 正常权重不应该超过这个数
+            print(f"⚠️ {name} 包含异常极大值: {param.abs().max().item()}")
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# allowed model names
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
-import os
 
-# 1. 指定模型名称
-model_name = "openai-community/gpt2-medium"
-hf_token = os.getenv("HF_TOKEN")
-# 2. 加载预训练权重和模型结构
-# GPT2LMHeadModel 包含了预测下一个词所需的线性输出层
-model = GPT2LMHeadModel.from_pretrained(model_name)
-
-# 3. 加载对应的分词器
-tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-
+# 在你的 model = GPT2LMHeadModel.from_pretrained(model_name) 之后调用
+verify_model_health(model)
 # 设置为评估模式
 model.eval()
 
@@ -449,29 +324,64 @@ response_text = (
 )
 print(response_text)
 
+import torch
+
 
 def calc_loss_batch(input_batch, target_batch, model, device):
+    # 确保输入数据在正确的设备上
     input_batch, target_batch = input_batch.to(device), target_batch.to(device)
-    # 呼唤GPU
-    model.to(torch.float64)
-    outputs = model(input_batch.to(torch.int64))
-    logits = outputs.logits
-    # loss = outputs.loss
-    logits_f32 = logits.detach().to("cpu").to(torch.float32)
-    targets_f32 = target_batch.to("cpu")
-    loss = torch.nn.functional.cross_entropy(
-        logits_f32.view(-1, logits_f32.size(-1)),
-        targets_f32.view(-1),
-        ignore_index=-100
-    ).to(device)
-    # loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), target_batch.flatten())
-    # 用交叉熵函数对于logits进行计算并且拉伸到二维长度
 
+    # 1. 检查全屏蔽风险 (CrossEntropy 零分母检查)
+    if (target_batch == -100).all():
+        print("⚠️ 警告：检测到当前 Batch 的 Targets 全部为 -100，跳过计算。")
+        return torch.tensor(0.0, device=device, requires_grad=True)
+
+    # 2. 生成 Attention Mask
+    # 注意：填充 ID 需与你的 Tokenizer 一致，GPT-2 通常是 50256
+    attention_mask = (input_batch != 50256).long().to(device)
+
+    # 3. 提升模型精度至 float64 (数值稳定性最强模式)
+    # 注意：这会显著消耗 CPU 内存和计算时间
+    model.to(torch.float64)
+
+    # 4. 前向传播
+    # 显式转换输入类型以匹配模型精度
+    outputs = model(
+        input_ids=input_batch.to(torch.int64),
+        attention_mask=attention_mask.to(torch.float64),
+        labels=target_batch.to(torch.int64)
+    )
+
+    logits = outputs.logits
+    loss = outputs.loss
+
+    # 5. 诊断 NaN
+    if torch.isnan(loss):
+        print("\n--- [双精度模式] 依然检测到 Loss 为 NaN ---")
+        print(f"Logits Max: {logits.max().item()}")
+        print(f"Logits 包含 NaN 的比例: {torch.isnan(logits).float().mean().item():.2%}")
+
+        # 检查是否权重本身已经带了 NaN (即使在 float64 下)
+        for name, param in model.named_parameters():
+            if torch.isnan(param).any():
+                print(f"🚨 发现损坏权重: {name}")
+                break
+
+        # 尝试通过 CPU 手动 CrossEntropy 抢救（强制 float32 降噪）
+        logits_f32 = logits.detach().to("cpu").to(torch.float32)
+        targets_f32 = target_batch.to("cpu")
+        loss = torch.nn.functional.cross_entropy(
+            logits_f32.view(-1, logits_f32.size(-1)),
+            targets_f32.view(-1),
+            ignore_index=-100
+        ).to(device)
+
+    # 6. 重要：将模型还原回 float32 供优化器使用
+    # 如果不还原，后续 optimizer.step() 可能会报错（如果优化器初始化时是 fp32）
     model.to(torch.float32)
+
     return loss
 
-
-# 一个计算批损失的函数
 
 def calc_loss_loader(data_loader, model, device, num_batches=None):
     total_loss = 0.
@@ -602,48 +512,3 @@ with torch.no_grad():
 # 先看一次没有微调的结果
 print("Training loss:", train_loss)
 print("Validation loss:", val_loss)
-
-import time
-
-start_time = time.time()
-
-torch.manual_seed(123)
-
-# 用Adam训练,并定义了学习率、权重衰减等参数
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.00005, weight_decay=0.1)
-
-num_epochs = 2
-
-train_losses, val_losses, tokens_seen = train_model_simple(
-    model, train_loader, val_loader, optimizer, device,
-    num_epochs=num_epochs, eval_freq=5, eval_iter=5,
-    start_context=format_input(val_data[0]), tokenizer=tokenizer
-)
-
-end_time = time.time()
-execution_time_minutes = (end_time - start_time) / 60
-print(f"Training completed in {execution_time_minutes:.2f} minutes.")
-
-torch.manual_seed(123)
-
-for entry in test_data[:3]:
-    input_text = format_input(entry)
-
-    token_ids = generate(
-        model=model,
-        idx=text_to_token_ids(input_text, tokenizer).to(device),
-        max_new_tokens=256,
-        context_size=256,
-        eos_id=50256
-    )
-    generated_text = token_ids_to_text(token_ids, tokenizer)
-    response_text = (
-        generated_text[len(input_text):]
-        .replace("### Response:", "")
-        .strip()
-    )
-
-    print(input_text)
-    print(f"\nCorrect response:\n>> {entry['output']}")
-    print(f"\nModel response:\n>> {response_text.strip()}")
-    print("-------------------------------------")
