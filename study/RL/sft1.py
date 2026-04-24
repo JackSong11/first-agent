@@ -1,4 +1,5 @@
 import torch
+import os
 from datasets import load_dataset
 from transformers import (
     AutoTokenizer,
@@ -10,7 +11,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, TaskType
 
 # 1. 配置路径和参数
-model_path = "Qwen/Qwen3-0.6B"  # 或者是你的本地绝对路径
+model_path = "Qwen/Qwen3-0.6B"
 output_dir = "./models/qwen3_gsm8k_lora"
 
 # 检测设备: Mac 使用 mps, 否则用 cpu
@@ -19,13 +20,14 @@ print(f"Using device: {device}")
 
 # 2. 加载 Tokenizer 和模型
 tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-tokenizer.pad_token = tokenizer.eos_token  # Qwen 默认可能需要设置 pad_token
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
 
-# 1. 明确加载为 float32
+# 显式使用 float32 以确保 MPS 上的数值稳定性
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
-    torch_dtype=torch.float32, # 改为 float32 增加稳定性
-    device_map={"": "mps"},    # 这种写法更兼容
+    torch_dtype=torch.float32,
+    device_map={"": device},
     trust_remote_code=True
 )
 
@@ -33,37 +35,50 @@ model = AutoModelForCausalLM.from_pretrained(
 peft_config = LoraConfig(
     task_type=TaskType.CAUSAL_LM,
     inference_mode=False,
-    r=8,  # 秩
-    lora_alpha=32,  # 缩放系数
+    r=8,
+    lora_alpha=32,
     lora_dropout=0.1,
-    target_modules=["q_proj", "v_proj"]  # Qwen 常见的注意力层命名
+    target_modules=["q_proj", "v_proj"]
 )
 model = get_peft_model(model, peft_config)
+
+# 关键：确保 LoRA 层也是 float32，防止混合精度导致 nan
+for param in model.parameters():
+    param.data = param.data.to(torch.float32)
+
 model.print_trainable_parameters()
 
 # 4. 加载并预处理 GSM8K 数据集
-dataset = load_dataset("gsm8k", "main", split="train[:1000]")  # 先取1000条做演示
+dataset = load_dataset("gsm8k", "main", split="train[:1000]")
 
 
-# 2. 改进数据预处理函数
 def process_func(example):
-    MAX_LENGTH = 384  # 缩短长度节省内存
-    # 严格按照 Qwen 的 ChatML 格式
-    instruction = f"<|im_start|>user\n{example['question']}<|im_end|>\n<|im_start|>assistant\n"
-    response = f"{example['answer']}<|im_end|>"
+    MAX_LENGTH = 384
 
-    # 编码输入和输出
+    # 解析 GSM8K 答案格式
+    raw_answer = example["answer"]
+    if "####" in raw_answer:
+        reasoning, final_answer = raw_answer.split("####")
+        reasoning = reasoning.strip()
+        final_answer = final_answer.strip()
+    else:
+        reasoning = raw_answer
+        final_answer = ""
+
+    # 构造 Prompt：包含 ChatML 标记和思维链触发词
+    instruction = f"<|im_start|>user\nQuestion: {example['question']}\n\nLet's solve this step by step:<|im_end|>\n<|im_start|>assistant\n"
+    response = f"{reasoning}\n\nFinal Answer: {final_answer}<|im_end|>"
+
     model_inputs = tokenizer(instruction, add_special_tokens=False)
     labels_ids = tokenizer(response, add_special_tokens=False)
 
-    # 拼接
     input_ids = model_inputs["input_ids"] + labels_ids["input_ids"]
     attention_mask = model_inputs["attention_mask"] + labels_ids["attention_mask"]
 
-    # 关键：Label 屏蔽掉指令部分，只计算回答部分的 Loss
+    # 只对回答部分计算 Loss，指令部分用 -100 屏蔽
     labels = [-100] * len(model_inputs["input_ids"]) + labels_ids["input_ids"]
 
-    # 截断
+    # 截断处理
     if len(input_ids) > MAX_LENGTH:
         input_ids = input_ids[:MAX_LENGTH]
         attention_mask = attention_mask[:MAX_LENGTH]
@@ -78,24 +93,31 @@ def process_func(example):
 
 tokenized_ds = dataset.map(process_func, remove_columns=dataset.column_names)
 
-# 5. 修正后的训练参数
+# 打印一条数据检查 labels 是否全为 -100（如果是，说明截断太严重，需调大 MAX_LENGTH）
+print(f"Check labels (should contain non -100 values): {tokenized_ds[0]['labels'][-10:]}")
+
+# 5. 增强稳定性的训练参数
 args = TrainingArguments(
     output_dir=output_dir,
-    per_device_train_batch_size=1,      # 压到最低，保证不崩
-    gradient_accumulation_steps=16,     # 累积步数增加，保持总 Batch Size (1*16=16) 不变
+    per_device_train_batch_size=1,
+    gradient_accumulation_steps=16,
     logging_steps=1,
     num_train_epochs=1,
-    learning_rate=5e-5,                 # 调低学习率，防止出现之前日志里的 nan
-    lr_scheduler_type="constant",
-    warmup_steps=20,
-    gradient_checkpointing=True,        # 关键！开启梯度检查点，大幅节省内存
-    fp16=False,
-    bf16=False,
-    optim="adamw_torch",                # 明确指定优化器
-    dataloader_pin_memory=False,
+    learning_rate=2e-5,  # 进一步降低学习率
+    lr_scheduler_type="cosine",  # 使用余弦退火，后期学习率更小更稳
+    warmup_steps=50,  # 增加预热步数，让模型慢慢进入状态
+    gradient_checkpointing=True,
+    fp16=False,  # MPS 不支持标准的 fp16 训练，设为 False
+    bf16=False,  # 同上，坚持使用 fp32
+    optim="adamw_torch",
+    adam_beta2=0.95,  # 优化器稳定性调整
+    adam_epsilon=1e-5,  # 防止分母过小导致 nan
     save_total_limit=1,
+    dataloader_pin_memory=False,
+    report_to="none"
 )
 
+# 6. 开始训练
 trainer = Trainer(
     model=model,
     args=args,
@@ -103,10 +125,10 @@ trainer = Trainer(
     data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True),
 )
 
-# 6. 开始训练
+print("Starting training on MPS...")
 trainer.train()
 
-# 7. 保存 LoRA 权重
+# 7. 保存
 model.save_pretrained(output_dir)
 tokenizer.save_pretrained(output_dir)
 print(f"训练完成，模型已保存至 {output_dir}")

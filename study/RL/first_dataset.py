@@ -12,6 +12,7 @@ sft_result = rl_tool.run({
 })
 sft_data = json.loads(sft_result)
 print(sft_result)
+print(f"所有字段: {sft_data.keys()}")
 print(type(sft_result))
 
 print(f"数据集大小: {sft_data['dataset_size']}")
