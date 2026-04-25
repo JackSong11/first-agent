@@ -1,0 +1,278 @@
+/Users/songzhiquan1/PycharmProjects/first-agent/.venv/bin/python3.12 /Users/songzhiquan1/PycharmProjects/first-agent/study/LLMs/ch07/instructions_finetuning.py
+matplotlib version: 3.10.8
+tiktoken version: 0.12.0
+torch version: 2.10.0
+tqdm version: 4.67.3
+Number of entries: 1100
+Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+Identify the correct spelling of the following word.
+
+### Input:
+Ocassion
+
+### Response:
+The correct spelling is 'Occasion.'
+Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+What is an antonym of 'complicated'?
+
+### Response:
+An antonym of 'complicated' is 'simple'.
+Training set length: 935
+Validation set length: 55
+Test set length: 110
+[50256]
+tensor([[    0,     1,     2,     3,     4],
+        [    5,     6, 50256, 50256, 50256],
+        [    7,     8,     9, 50256, 50256]])
+tensor([[    0,     1,     2,     3,     4],
+        [    5,     6, 50256, 50256, 50256],
+        [    7,     8,     9, 50256, 50256]])
+tensor([[    1,     2,     3,     4, 50256],
+        [    6, 50256, 50256, 50256, 50256],
+        [    8,     9, 50256, 50256, 50256]])
+tensor([[    0,     1,     2,     3,     4],
+        [    5,     6, 50256, 50256, 50256],
+        [    7,     8,     9, 50256, 50256]])
+tensor([[    1,     2,     3,     4, 50256],
+        [    6, 50256,  -100,  -100,  -100],
+        [    8,     9, 50256,  -100,  -100]])
+tensor(1.1269)
+tensor(0.7936)
+tensor(1.1269)
+loss_1 == loss_3: tensor(True)
+Device: cpu
+Train loader:
+torch.Size([8, 61]) torch.Size([8, 61])
+torch.Size([8, 76]) torch.Size([8, 76])
+torch.Size([8, 73]) torch.Size([8, 73])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 65]) torch.Size([8, 65])
+torch.Size([8, 72]) torch.Size([8, 72])
+torch.Size([8, 80]) torch.Size([8, 80])
+torch.Size([8, 67]) torch.Size([8, 67])
+torch.Size([8, 62]) torch.Size([8, 62])
+torch.Size([8, 75]) torch.Size([8, 75])
+torch.Size([8, 62]) torch.Size([8, 62])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 67]) torch.Size([8, 67])
+torch.Size([8, 77]) torch.Size([8, 77])
+torch.Size([8, 69]) torch.Size([8, 69])
+torch.Size([8, 79]) torch.Size([8, 79])
+torch.Size([8, 71]) torch.Size([8, 71])
+torch.Size([8, 66]) torch.Size([8, 66])
+torch.Size([8, 83]) torch.Size([8, 83])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 80]) torch.Size([8, 80])
+torch.Size([8, 71]) torch.Size([8, 71])
+torch.Size([8, 69]) torch.Size([8, 69])
+torch.Size([8, 65]) torch.Size([8, 65])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 60]) torch.Size([8, 60])
+torch.Size([8, 59]) torch.Size([8, 59])
+torch.Size([8, 69]) torch.Size([8, 69])
+torch.Size([8, 63]) torch.Size([8, 63])
+torch.Size([8, 65]) torch.Size([8, 65])
+torch.Size([8, 76]) torch.Size([8, 76])
+torch.Size([8, 66]) torch.Size([8, 66])
+torch.Size([8, 71]) torch.Size([8, 71])
+torch.Size([8, 91]) torch.Size([8, 91])
+torch.Size([8, 65]) torch.Size([8, 65])
+torch.Size([8, 64]) torch.Size([8, 64])
+torch.Size([8, 67]) torch.Size([8, 67])
+torch.Size([8, 66]) torch.Size([8, 66])
+torch.Size([8, 64]) torch.Size([8, 64])
+torch.Size([8, 65]) torch.Size([8, 65])
+torch.Size([8, 75]) torch.Size([8, 75])
+torch.Size([8, 89]) torch.Size([8, 89])
+torch.Size([8, 59]) torch.Size([8, 59])
+torch.Size([8, 88]) torch.Size([8, 88])
+torch.Size([8, 83]) torch.Size([8, 83])
+torch.Size([8, 83]) torch.Size([8, 83])
+torch.Size([8, 70]) torch.Size([8, 70])
+torch.Size([8, 65]) torch.Size([8, 65])
+torch.Size([8, 74]) torch.Size([8, 74])
+torch.Size([8, 76]) torch.Size([8, 76])
+torch.Size([8, 67]) torch.Size([8, 67])
+torch.Size([8, 75]) torch.Size([8, 75])
+torch.Size([8, 83]) torch.Size([8, 83])
+torch.Size([8, 69]) torch.Size([8, 69])
+torch.Size([8, 67]) torch.Size([8, 67])
+torch.Size([8, 60]) torch.Size([8, 60])
+torch.Size([8, 60]) torch.Size([8, 60])
+torch.Size([8, 66]) torch.Size([8, 66])
+torch.Size([8, 80]) torch.Size([8, 80])
+torch.Size([8, 71]) torch.Size([8, 71])
+torch.Size([8, 61]) torch.Size([8, 61])
+torch.Size([8, 58]) torch.Size([8, 58])
+torch.Size([8, 71]) torch.Size([8, 71])
+torch.Size([8, 67]) torch.Size([8, 67])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 63]) torch.Size([8, 63])
+torch.Size([8, 87]) torch.Size([8, 87])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 64]) torch.Size([8, 64])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 71]) torch.Size([8, 71])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 71]) torch.Size([8, 71])
+torch.Size([8, 61]) torch.Size([8, 61])
+torch.Size([8, 65]) torch.Size([8, 65])
+torch.Size([8, 67]) torch.Size([8, 67])
+torch.Size([8, 65]) torch.Size([8, 65])
+torch.Size([8, 64]) torch.Size([8, 64])
+torch.Size([8, 60]) torch.Size([8, 60])
+torch.Size([8, 72]) torch.Size([8, 72])
+torch.Size([8, 64]) torch.Size([8, 64])
+torch.Size([8, 70]) torch.Size([8, 70])
+torch.Size([8, 57]) torch.Size([8, 57])
+torch.Size([8, 72]) torch.Size([8, 72])
+torch.Size([8, 64]) torch.Size([8, 64])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 62]) torch.Size([8, 62])
+torch.Size([8, 74]) torch.Size([8, 74])
+torch.Size([8, 80]) torch.Size([8, 80])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 70]) torch.Size([8, 70])
+torch.Size([8, 91]) torch.Size([8, 91])
+torch.Size([8, 61]) torch.Size([8, 61])
+torch.Size([8, 66]) torch.Size([8, 66])
+torch.Size([8, 80]) torch.Size([8, 80])
+torch.Size([8, 81]) torch.Size([8, 81])
+torch.Size([8, 74]) torch.Size([8, 74])
+torch.Size([8, 82]) torch.Size([8, 82])
+torch.Size([8, 63]) torch.Size([8, 63])
+torch.Size([8, 83]) torch.Size([8, 83])
+torch.Size([8, 68]) torch.Size([8, 68])
+torch.Size([8, 67]) torch.Size([8, 67])
+torch.Size([8, 77]) torch.Size([8, 77])
+torch.Size([8, 91]) torch.Size([8, 91])
+torch.Size([8, 64]) torch.Size([8, 64])
+torch.Size([8, 61]) torch.Size([8, 61])
+torch.Size([8, 75]) torch.Size([8, 75])
+torch.Size([8, 64]) torch.Size([8, 64])
+torch.Size([8, 66]) torch.Size([8, 66])
+torch.Size([8, 78]) torch.Size([8, 78])
+torch.Size([8, 66]) torch.Size([8, 66])
+torch.Size([8, 64]) torch.Size([8, 64])
+torch.Size([8, 83]) torch.Size([8, 83])
+torch.Size([8, 66]) torch.Size([8, 66])
+torch.Size([8, 74]) torch.Size([8, 74])
+torch.Size([8, 69]) torch.Size([8, 69])
+tensor([21106,   318,   281, 12064,   326,  8477,   257,  4876,    13, 19430,
+          257,  2882,   326, 20431, 32543,   262,  2581,    13,   198,   198,
+        21017, 46486,    25,   198, 30003,  6525,   262,  6827,  1262,   257,
+          985,   576,    13,   198,   198, 21017, 23412,    25,   198,   464,
+         5156,   318,   845, 13779,    13,   198,   198, 21017, 18261,    25,
+          198,   464,  5156,   318,   355, 13779,   355,   257,  4936,    13,
+        50256, 50256, 50256, 50256, 50256, 50256, 50256, 50256, 50256])
+tensor([  318,   281, 12064,   326,  8477,   257,  4876,    13, 19430,   257,
+         2882,   326, 20431, 32543,   262,  2581,    13,   198,   198, 21017,
+        46486,    25,   198, 30003,  6525,   262,  6827,  1262,   257,   985,
+          576,    13,   198,   198, 21017, 23412,    25,   198,   464,  5156,
+          318,   845, 13779,    13,   198,   198, 21017, 18261,    25,   198,
+          464,  5156,   318,   355, 13779,   355,   257,  4936,    13, 50256,
+         -100,  -100,  -100,  -100,  -100,  -100,  -100,  -100,  -100])
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights: 100%|██████████| 292/292 [00:00<00:00, 9808.57it/s]
+Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+Convert the active sentence to passive: 'The chef cooks the meal every day.'
+```````````````````````````````````
+Training loss: 3.825911546660882
+Validation loss: 3.761936717914294
+Ep 1 (Step 000000): Train loss 3.650, Val loss 3.578
+Ep 1 (Step 000005): Train loss 2.761, Val loss 2.801
+Ep 1 (Step 000010): Train loss 2.392, Val loss 2.429
+Ep 1 (Step 000015): Train loss 2.185, Val loss 2.155
+Ep 1 (Step 000020): Train loss 1.883, Val loss 1.901
+Ep 1 (Step 000025): Train loss 1.630, Val loss 1.683
+Ep 1 (Step 000030): Train loss 1.441, Val loss 1.486
+Ep 1 (Step 000035): Train loss 1.273, Val loss 1.287
+Ep 1 (Step 000040): Train loss 1.058, Val loss 1.161
+Ep 1 (Step 000045): Train loss 1.062, Val loss 1.105
+Ep 1 (Step 000050): Train loss 0.964, Val loss 1.067
+Ep 1 (Step 000055): Train loss 1.038, Val loss 1.036
+Ep 1 (Step 000060): Train loss 0.947, Val loss 1.015
+Ep 1 (Step 000065): Train loss 0.930, Val loss 0.996
+Ep 1 (Step 000070): Train loss 0.910, Val loss 0.982
+Ep 1 (Step 000075): Train loss 0.825, Val loss 0.971
+Ep 1 (Step 000080): Train loss 0.899, Val loss 0.958
+Ep 1 (Step 000085): Train loss 0.925, Val loss 0.949
+Ep 1 (Step 000090): Train loss 0.988, Val loss 0.939
+Ep 1 (Step 000095): Train loss 1.014, Val loss 0.932
+Ep 1 (Step 000100): Train loss 0.815, Val loss 0.930
+Ep 1 (Step 000105): Train loss 0.899, Val loss 0.924
+Ep 1 (Step 000110): Train loss 0.923, Val loss 0.917
+Ep 1 (Step 000115): Train loss 0.896, Val loss 0.907
+Below is an instruction that describes a task. Write a response that appropriately completes the request.  ### Instruction: Convert the active sentence to passive: 'The chef cooks the meal every day.'  ### Response: The active sentence is 'The chef cooks the meal every day.'<|endoftext|>The following is an instruction that describes a task. Write a response that appropriately completes the request.  ### Instruction: Convert the active sentence
+Ep 2 (Step 000120): Train loss 0.871, Val loss 0.904
+Ep 2 (Step 000125): Train loss 0.802, Val loss 0.910
+Ep 2 (Step 000130): Train loss 0.860, Val loss 0.905
+Ep 2 (Step 000135): Train loss 0.858, Val loss 0.898
+Ep 2 (Step 000140): Train loss 0.801, Val loss 0.891
+Ep 2 (Step 000145): Train loss 0.789, Val loss 0.887
+Ep 2 (Step 000150): Train loss 0.780, Val loss 0.884
+Ep 2 (Step 000155): Train loss 0.787, Val loss 0.879
+Ep 2 (Step 000160): Train loss 0.884, Val loss 0.868
+Ep 2 (Step 000165): Train loss 0.749, Val loss 0.862
+Ep 2 (Step 000170): Train loss 0.775, Val loss 0.859
+Ep 2 (Step 000175): Train loss 0.762, Val loss 0.858
+Ep 2 (Step 000180): Train loss 0.756, Val loss 0.862
+Ep 2 (Step 000185): Train loss 0.754, Val loss 0.863
+Ep 2 (Step 000190): Train loss 0.735, Val loss 0.857
+Ep 2 (Step 000195): Train loss 0.734, Val loss 0.845
+Ep 2 (Step 000200): Train loss 0.773, Val loss 0.841
+Ep 2 (Step 000205): Train loss 0.751, Val loss 0.838
+Ep 2 (Step 000210): Train loss 0.726, Val loss 0.836
+Ep 2 (Step 000215): Train loss 0.713, Val loss 0.833
+Ep 2 (Step 000220): Train loss 0.750, Val loss 0.832
+Ep 2 (Step 000225): Train loss 0.696, Val loss 0.827
+Ep 2 (Step 000230): Train loss 0.761, Val loss 0.825
+Below is an instruction that describes a task. Write a response that appropriately completes the request.  ### Instruction: Convert the active sentence to passive: 'The chef cooks the meal every day.'  ### Response: The active sentence is 'The chef cooks the meal every day.'<|endoftext|>The following is an instruction that describes a task. Write a response that appropriately completes the request.  ### Instruction: Convert the active sentence
+Training completed in 104.64 minutes.
+Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+Rewrite the sentence using a simile.
+
+### Input:
+The car is very fast.
+
+Correct response:
+>> The car is as fast as lightning.
+
+Model response:
+>> The car is very fast.
+-------------------------------------
+Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+What type of cloud is typically associated with thunderstorms?
+
+Correct response:
+>> The type of cloud typically associated with thunderstorms is cumulonimbus.
+
+Model response:
+>> A thunderstorm is a type of storm that is associated with thunderstorms.
+-------------------------------------
+Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+Name the author of 'Pride and Prejudice'.
+
+Correct response:
+>> Jane Austen.
+
+Model response:
+>> The author of 'Pride and Prejudice' is George Bernard Shaw.
+-------------------------------------
+100%|██████████| 110/110 [14:11<00:00,  7.74s/it]
+{'instruction': 'Rewrite the sentence using a simile.', 'input': 'The car is very fast.', 'output': 'The car is as fast as lightning.', 'model_response': 'The car is very fast.'}
+Model saved as gpt2-medium-sft.pth
+
+Process finished with exit code 0
