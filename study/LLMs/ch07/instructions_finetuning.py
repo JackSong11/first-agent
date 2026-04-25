@@ -113,6 +113,7 @@ class InstructionDataset(Dataset):
 
 import tiktoken
 
+device = "cpu"
 # gpt2作为编码模型
 tokenizer = tiktoken.get_encoding("gpt2")
 print(tokenizer.encode("<|endoftext|>", allowed_special={"<|endoftext|>"}))
@@ -121,7 +122,7 @@ print(tokenizer.encode("<|endoftext|>", allowed_special={"<|endoftext|>"}))
 def custom_collate_draft_1(
         batch,
         pad_token_id=50256,
-        device="cpu"
+        device = "cpu"
 ):
     # 找到批次中最长的序列
     # 并将最大长度增加1，这样会在后面添加一个额外的填充 token
@@ -163,7 +164,7 @@ print(custom_collate_draft_1(batch))
 def custom_collate_draft_2(
         batch,
         pad_token_id=50256,
-        device="cpu"
+        device = "cpu"
 ):
     # 找到最大的序列长度
     batch_max_length = max(len(item) + 1 for item in batch)
@@ -200,7 +201,7 @@ def custom_collate_fn(
         pad_token_id=50256,
         ignore_index=-100,
         allowed_max_length=None,
-        device="cpu"
+        device = "cpu"
 ):
     # 找到批次中最长的序列
     batch_max_length = max(len(item) + 1 for item in batch)
@@ -280,12 +281,6 @@ print("loss_1 == loss_3:", loss_1 == loss_3)
 # 这比在Apple CPU上运行要快得多（在M3 MacBook Air上测得）。
 # 然而，计算得到的loss可能会略有不同。
 
-if torch.cuda.is_available():
-    device = torch.device("cuda")
-elif torch.backends.mps.is_available():
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
 
 print("Device:", device)
 
@@ -347,7 +342,6 @@ print(targets[0])
 from importlib.metadata import version
 import torch
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # allowed model names
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import os
@@ -451,23 +445,22 @@ print(response_text)
 
 
 def calc_loss_batch(input_batch, target_batch, model, device):
-    input_batch, target_batch = input_batch.to(device), target_batch.to(device)
-    # 呼唤GPU
-    model.to(torch.float64)
-    outputs = model(input_batch.to(torch.int64))
-    logits = outputs.logits
-    # loss = outputs.loss
-    logits_f32 = logits.detach().to("cpu").to(torch.float32)
-    targets_f32 = target_batch.to("cpu")
-    loss = torch.nn.functional.cross_entropy(
-        logits_f32.view(-1, logits_f32.size(-1)),
-        targets_f32.view(-1),
-        ignore_index=-100
-    ).to(device)
-    # loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), target_batch.flatten())
-    # 用交叉熵函数对于logits进行计算并且拉伸到二维长度
+    # 1. 搬运数据并对齐类型
+    input_batch = input_batch.to(device).to(torch.int64)
+    target_batch = target_batch.to(device).to(torch.int64)
 
-    model.to(torch.float32)
+    # 2. 前向传播
+    # 此时 model 已经是 float64，所以 outputs.logits 也会自动是 float64
+    outputs = model(input_batch)
+    logits = outputs.logits
+
+    # 3. 计算 Loss (全程在 float64 下进行，精度极高，无 NaN 风险)
+    loss = torch.nn.functional.cross_entropy(
+        logits.view(-1, logits.size(-1)),
+        target_batch.view(-1),
+        ignore_index=-100
+    )
+
     return loss
 
 
@@ -516,7 +509,10 @@ def generate_text_simple(model, idx, max_new_tokens, context_size):
 
         # Get the predictions
         with torch.no_grad():
-            logits = model(idx_cond)
+            # logits = model(idx_cond)
+            # 【修改点】Hugging Face 模型返回的是对象，需要取 .logits
+            outputs = model(idx_cond)
+            logits = outputs.logits
 
         # Focus only on the last time step
         # (batch, n_token, vocab_size) becomes (batch, vocab_size)
@@ -592,7 +588,7 @@ def train_model_simple(model, train_loader, val_loader, optimizer, device, num_e
 
 
 model.to(device)
-
+model.to(torch.float64)
 torch.manual_seed(123)
 
 with torch.no_grad():
@@ -610,7 +606,14 @@ start_time = time.time()
 torch.manual_seed(123)
 
 # 用Adam训练,并定义了学习率、权重衰减等参数
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.00005, weight_decay=0.1)
+# 第一步：把模型搬到设备并强制转为 float64
+model.to(device)
+model.to(torch.float64)
+
+# 第二步：【关键】在模型转换完 float64 后再定义优化器
+# 这样 optimizer 里的参数指针才是 float64 类型的
+optimizer = torch.optim.AdamW(model.parameters(), lr=5e-6, weight_decay=0.1)
+# optimizer = torch.optim.AdamW(model.parameters(), lr=0.00005, weight_decay=0.1)
 
 num_epochs = 2
 
@@ -647,3 +650,34 @@ for entry in test_data[:3]:
     print(f"\nCorrect response:\n>> {entry['output']}")
     print(f"\nModel response:\n>> {response_text.strip()}")
     print("-------------------------------------")
+
+from tqdm import tqdm
+
+for i, entry in tqdm(enumerate(test_data), total=len(test_data)):
+    input_text = format_input(entry)
+
+    token_ids = generate(
+        model=model,
+        idx=text_to_token_ids(input_text, tokenizer).to(device),
+        max_new_tokens=256,
+        context_size=256,
+        eos_id=50256
+    )
+    generated_text = token_ids_to_text(token_ids, tokenizer)
+    response_text = generated_text[len(input_text):].replace("### Response:", "").strip()
+
+    test_data[i]["model_response"] = response_text
+
+with open("instruction-data-with-response.json", "w") as file:
+    json.dump(test_data, file, indent=4)  # "indent"设置用于美化输出
+
+print(test_data[0])
+
+import re
+
+file_name = f"{re.sub(r'[ ()]', '', "gpt2-medium")}-sft.pth"
+torch.save(model.state_dict(), file_name)
+print(f"Model saved as {file_name}")
+
+# Load model via
+# model.load_state_dict(torch.load("gpt2-medium355M-sft.pth"))
