@@ -81,8 +81,10 @@ def run_bash(command: str) -> str:
 def agent_loop(messages: list):
     while True:
         response = client.chat.completions.create(
-            model="Qwen3-235B-A22B", messages=messages,
-            tools=TOOLS, max_tokens=8000,
+            model="Qwen3-235B-A22B",
+            messages=messages,
+            tools=TOOLS,
+            max_tokens=8000,
         )
         # Append assistant turn
         response_message = response.choices[0].message
