@@ -27,17 +27,19 @@ import os
 import subprocess
 from pathlib import Path
 
-from anthropic import Anthropic
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-if os.getenv("ANTHROPIC_BASE_URL"):
-    os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
+# 初始化 OpenAI 客户端
+# 注意：如果你使用第三方转发或本地模型，可以通过 base_url 和 api_key 配置
+client = OpenAI(
+    api_key=os.environ.get("LLM_API_KEY"),
+    base_url=os.environ.get("LLM_BASE_URL"),
+)
+MODEL = os.environ["LLM_MODEL_ID"]
 WORKDIR = Path.cwd()
-client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-MODEL = os.environ["MODEL_ID"]
 TASKS_DIR = WORKDIR / ".tasks"
 
 SYSTEM = f"You are a coding agent at {WORKDIR}. Use task tools to plan and track work."
@@ -128,6 +130,7 @@ def safe_path(p: str) -> Path:
         raise ValueError(f"Path escapes workspace: {p}")
     return path
 
+
 def run_bash(command: str) -> str:
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
     if any(d in command for d in dangerous):
@@ -140,6 +143,7 @@ def run_bash(command: str) -> str:
     except subprocess.TimeoutExpired:
         return "Error: Timeout (120s)"
 
+
 def run_read(path: str, limit: int = None) -> str:
     try:
         lines = safe_path(path).read_text().splitlines()
@@ -149,6 +153,7 @@ def run_read(path: str, limit: int = None) -> str:
     except Exception as e:
         return f"Error: {e}"
 
+
 def run_write(path: str, content: str) -> str:
     try:
         fp = safe_path(path)
@@ -157,6 +162,7 @@ def run_write(path: str, content: str) -> str:
         return f"Wrote {len(content)} bytes"
     except Exception as e:
         return f"Error: {e}"
+
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
     try:
@@ -170,62 +176,111 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
         return f"Error: {e}"
 
 
+# -- 工具分发器 --
 TOOL_HANDLERS = {
-    "bash":        lambda **kw: run_bash(kw["command"]),
-    "read_file":   lambda **kw: run_read(kw["path"], kw.get("limit")),
-    "write_file":  lambda **kw: run_write(kw["path"], kw["content"]),
-    "edit_file":   lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
+    "bash": lambda **kw: run_bash(kw["command"]),
+    "read_file": lambda **kw: run_read(kw["path"], kw.get("limit")),
+    "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
+    "edit_file": lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
     "task_create": lambda **kw: TASKS.create(kw["subject"], kw.get("description", "")),
-    "task_update": lambda **kw: TASKS.update(kw["task_id"], kw.get("status"), kw.get("addBlockedBy"), kw.get("removeBlockedBy")),
-    "task_list":   lambda **kw: TASKS.list_all(),
-    "task_get":    lambda **kw: TASKS.get(kw["task_id"]),
+    "task_update": lambda **kw: TASKS.update(kw["task_id"], kw.get("status"), kw.get("addBlockedBy"),
+                                             kw.get("removeBlockedBy")),
+    "task_list": lambda **kw: TASKS.list_all(),
+    "task_get": lambda **kw: TASKS.get(kw["task_id"]),
 }
 
+# -- OpenAI 格式的工具定义 --
 TOOLS = [
-    {"name": "bash", "description": "Run a shell command.",
-     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
-    {"name": "read_file", "description": "Read file contents.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["path"]}},
-    {"name": "write_file", "description": "Write content to file.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
-    {"name": "edit_file", "description": "Replace exact text in file.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
-    {"name": "task_create", "description": "Create a new task.",
-     "input_schema": {"type": "object", "properties": {"subject": {"type": "string"}, "description": {"type": "string"}}, "required": ["subject"]}},
-    {"name": "task_update", "description": "Update a task's status or dependencies.",
-     "input_schema": {"type": "object", "properties": {"task_id": {"type": "integer"}, "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}, "addBlockedBy": {"type": "array", "items": {"type": "integer"}}, "removeBlockedBy": {"type": "array", "items": {"type": "integer"}}}, "required": ["task_id"]}},
-    {"name": "task_list", "description": "List all tasks with status summary.",
-     "input_schema": {"type": "object", "properties": {}}},
-    {"name": "task_get", "description": "Get full details of a task by ID.",
-     "input_schema": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
+    {"type": "function", "function": {"name": "bash", "description": "Run a shell command.",
+                                      "parameters": {"type": "object", "properties": {"command": {"type": "string"}},
+                                                     "required": ["command"]}}},
+    {"type": "function", "function": {"name": "read_file", "description": "Read file contents.",
+                                      "parameters": {"type": "object", "properties": {"path": {"type": "string"},
+                                                                                      "limit": {"type": "integer"}},
+                                                     "required": ["path"]}}},
+    {"type": "function", "function": {"name": "write_file", "description": "Write content to file.",
+                                      "parameters": {"type": "object", "properties": {"path": {"type": "string"},
+                                                                                      "content": {"type": "string"}},
+                                                     "required": ["path", "content"]}}},
+    {"type": "function", "function": {"name": "edit_file", "description": "Replace exact text in file.",
+                                      "parameters": {"type": "object", "properties": {"path": {"type": "string"},
+                                                                                      "old_text": {"type": "string"},
+                                                                                      "new_text": {"type": "string"}},
+                                                     "required": ["path", "old_text", "new_text"]}}},
+    {"type": "function", "function": {"name": "task_create", "description": "Create a new task.",
+                                      "parameters": {"type": "object", "properties": {"subject": {"type": "string"},
+                                                                                      "description": {
+                                                                                          "type": "string"}},
+                                                     "required": ["subject"]}}},
+    {"type": "function", "function": {"name": "task_update", "description": "Update a task's status or dependencies.",
+                                      "parameters": {"type": "object", "properties": {"task_id": {"type": "integer"},
+                                                                                      "status": {"type": "string",
+                                                                                                 "enum": ["pending",
+                                                                                                          "in_progress",
+                                                                                                          "completed"]},
+                                                                                      "addBlockedBy": {"type": "array",
+                                                                                                       "items": {
+                                                                                                           "type": "integer"}},
+                                                                                      "removeBlockedBy": {
+                                                                                          "type": "array", "items": {
+                                                                                              "type": "integer"}}},
+                                                     "required": ["task_id"]}}},
+    {"type": "function", "function": {"name": "task_list", "description": "List all tasks with status summary.",
+                                      "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "task_get", "description": "Get full details of a task by ID.",
+                                      "parameters": {"type": "object", "properties": {"task_id": {"type": "integer"}},
+                                                     "required": ["task_id"]}}},
 ]
 
 
 def agent_loop(messages: list):
+    """OpenAI 标准的消息循环实现"""
+    if not any(m["role"] == "system" for m in messages):
+        messages.insert(0, {"role": "system", "content": SYSTEM})
+
     while True:
-        response = client.messages.create(
-            model=MODEL, system=SYSTEM, messages=messages,
-            tools=TOOLS, max_tokens=8000,
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            tools=TOOLS,
+            tool_choice="auto"
         )
-        messages.append({"role": "assistant", "content": response.content})
-        if response.stop_reason != "tool_use":
+
+        response_message = response.choices[0].message
+        messages.append(response_message)  # OpenAI SDK 支持直接追加 message 对象
+
+        if not response_message.tool_calls:
+            # 没有工具调用，打印回复并结束
+            if response_message.content:
+                print(f"\n{response_message.content}")
             return
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                handler = TOOL_HANDLERS.get(block.name)
-                try:
-                    output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                except Exception as e:
-                    output = f"Error: {e}"
-                print(f"> {block.name}:")
-                print(str(output)[:200])
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
-        messages.append({"role": "user", "content": results})
+
+        # 处理工具调用
+        for tool_call in response_message.tool_calls:
+            function_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+
+            print(f"> tool: {function_name}")
+            handler = TOOL_HANDLERS.get(function_name)
+            try:
+                result = handler(**function_args) if handler else f"Error: Tool {function_name} not found"
+            except Exception as e:
+                result = f"Error: {e}"
+
+            print(f"  output: {str(result)[:100]}...")
+
+            # 将工具结果存入消息历史
+            messages.append({
+                "tool_call_id": tool_call.id,
+                "role": "tool",
+                "name": function_name,
+                "content": str(result),
+            })
 
 
 if __name__ == "__main__":
     history = []
+    print("\033[32mSystem initialized. OpenAI format. Type 'exit' to quit.\033[0m")
     while True:
         try:
             query = input("\033[36ms07 >> \033[0m")
@@ -233,11 +288,12 @@ if __name__ == "__main__":
             break
         if query.strip().lower() in ("q", "exit", ""):
             break
+
         history.append({"role": "user", "content": query})
         agent_loop(history)
-        response_content = history[-1]["content"]
-        if isinstance(response_content, list):
-            for block in response_content:
-                if hasattr(block, "text"):
-                    print(block.text)
-        print()
+        # 打印最后一条非工具调用的回复
+        last_msg = history[-1]
+        if hasattr(last_msg, 'content') and last_msg.content:
+            print(f"\nAI: {last_msg.content}")
+        elif isinstance(last_msg, dict) and last_msg.get("content"):
+            print(f"\nAI: {last_msg['content']}")
