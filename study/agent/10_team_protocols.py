@@ -55,16 +55,19 @@ import time
 import uuid
 from pathlib import Path
 
-from anthropic import Anthropic
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
-if os.getenv("ANTHROPIC_BASE_URL"):
-    os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
 WORKDIR = Path.cwd()
-client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-MODEL = os.environ["MODEL_ID"]
+# 初始化 OpenAI 客户端
+# 注意：如果你使用第三方转发或本地模型，可以通过 base_url 和 api_key 配置
+client = OpenAI(
+    api_key=os.environ.get("LLM_API_KEY"),
+    base_url=os.environ.get("LLM_BASE_URL"),
+)
+MODEL = os.environ["LLM_MODEL_ID"]
 TEAM_DIR = WORKDIR / ".team"
 INBOX_DIR = TEAM_DIR / "inbox"
 
@@ -179,8 +182,12 @@ class TeammateManager:
             f"Submit plans via plan_approval before major work. "
             f"Respond to shutdown_request with shutdown_response."
         )
-        messages = [{"role": "user", "content": prompt}]
-        tools = self._teammate_tools()
+        # OpenAI style messages
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": prompt}
+        ]
+        tools = self._get_openai_tools(is_lead=False)
         should_exit = False
         for _ in range(50):
             inbox = BUS.read_inbox(name)
@@ -189,35 +196,95 @@ class TeammateManager:
             if should_exit:
                 break
             try:
-                response = client.messages.create(
+                response = client.chat.completions.create(
                     model=MODEL,
-                    system=sys_prompt,
                     messages=messages,
                     tools=tools,
-                    max_tokens=8000,
                 )
-            except Exception:
+                choice = response.choices[0]
+                messages.append(choice.message)  # 必须添加完整消息对象
+
+                if choice.finish_reason == "tool_calls":
+                    for tool_call in choice.message.tool_calls:
+                        args = json.loads(tool_call.function.arguments)
+                        output = self._exec(name, tool_call.function.name, args)
+                        print(f"  [{name}] {tool_call.function.name}: {str(output)[:80]}")
+
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": str(output)
+                        })
+                        if tool_call.function.name == "shutdown_response" and args.get("approve"):
+                            should_exit = True
+                else:
+                    break
+            except Exception as e:
+                print(f"Error in {name} loop: {e}")
                 break
-            messages.append({"role": "assistant", "content": response.content})
-            if response.stop_reason != "tool_use":
-                break
-            results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    output = self._exec(name, block.name, block.input)
-                    print(f"  [{name}] {block.name}: {str(output)[:120]}")
-                    results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": str(output),
-                    })
-                    if block.name == "shutdown_response" and block.input.get("approve"):
-                        should_exit = True
-            messages.append({"role": "user", "content": results})
+
         member = self._find_member(name)
         if member:
             member["status"] = "shutdown" if should_exit else "idle"
             self._save_config()
+
+    def _get_openai_tools(self, is_lead=True):
+        # OpenAI 定义工具的格式
+        base_tools = [
+            {"type": "function", "function": {"name": "bash", "parameters": {"type": "object", "properties": {
+                "command": {"type": "string"}}, "required": ["command"]}}},
+            {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object", "properties": {
+                "path": {"type": "string"}}, "required": ["path"]}}},
+            {"type": "function", "function": {"name": "write_file", "parameters": {"type": "object", "properties": {
+                "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}},
+            {"type": "function", "function": {"name": "send_message", "parameters": {"type": "object", "properties": {
+                "to": {"type": "string"}, "content": {"type": "string"}, "msg_type": {"type": "string"}},
+                                                                                     "required": ["to", "content"]}}},
+            {"type": "function",
+             "function": {"name": "read_inbox", "parameters": {"type": "object", "properties": {}}}},
+        ]
+        if is_lead:
+            lead_tools = [
+                {"type": "function", "function": {"name": "spawn_teammate", "parameters": {"type": "object",
+                                                                                           "properties": {"name": {
+                                                                                               "type": "string"},
+                                                                                               "role": {
+                                                                                                   "type": "string"},
+                                                                                               "prompt": {
+                                                                                                   "type": "string"}},
+                                                                                           "required": ["name", "role",
+                                                                                                        "prompt"]}}},
+                {"type": "function", "function": {"name": "shutdown_request", "parameters": {"type": "object",
+                                                                                             "properties": {
+                                                                                                 "teammate": {
+                                                                                                     "type": "string"}},
+                                                                                             "required": [
+                                                                                                 "teammate"]}}},
+                {"type": "function", "function": {"name": "plan_approval", "parameters": {"type": "object",
+                                                                                          "properties": {"request_id": {
+                                                                                              "type": "string"},
+                                                                                              "approve": {
+                                                                                                  "type": "boolean"}},
+                                                                                          "required": ["request_id",
+                                                                                                       "approve"]}}},
+            ]
+            return base_tools + lead_tools
+        else:
+            member_tools = [
+                {"type": "function", "function": {"name": "shutdown_response", "parameters": {"type": "object",
+                                                                                              "properties": {
+                                                                                                  "request_id": {
+                                                                                                      "type": "string"},
+                                                                                                  "approve": {
+                                                                                                      "type": "boolean"}},
+                                                                                              "required": ["request_id",
+                                                                                                           "approve"]}}},
+                {"type": "function", "function": {"name": "plan_approval", "parameters": {"type": "object",
+                                                                                          "properties": {"plan": {
+                                                                                              "type": "string"}},
+                                                                                          "required": ["plan"]}}},
+            ]
+            return base_tools + member_tools
 
     def _exec(self, sender: str, tool_name: str, args: dict) -> str:
         # these base tools are unchanged from s02
@@ -255,27 +322,6 @@ class TeammateManager:
             )
             return f"Plan submitted (request_id={req_id}). Waiting for lead approval."
         return f"Unknown tool: {tool_name}"
-
-    def _teammate_tools(self) -> list:
-        # these base tools are unchanged from s02
-        return [
-            {"name": "bash", "description": "Run a shell command.",
-             "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
-            {"name": "read_file", "description": "Read file contents.",
-             "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
-            {"name": "write_file", "description": "Write content to file.",
-             "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
-            {"name": "edit_file", "description": "Replace exact text in file.",
-             "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
-            {"name": "send_message", "description": "Send message to a teammate.",
-             "input_schema": {"type": "object", "properties": {"to": {"type": "string"}, "content": {"type": "string"}, "msg_type": {"type": "string", "enum": list(VALID_MSG_TYPES)}}, "required": ["to", "content"]}},
-            {"name": "read_inbox", "description": "Read and drain your inbox.",
-             "input_schema": {"type": "object", "properties": {}}},
-            {"name": "shutdown_response", "description": "Respond to a shutdown request. Approve to shut down, reject to keep working.",
-             "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}, "approve": {"type": "boolean"}, "reason": {"type": "string"}}, "required": ["request_id", "approve"]}},
-            {"name": "plan_approval", "description": "Submit a plan for lead approval. Provide plan text.",
-             "input_schema": {"type": "object", "properties": {"plan": {"type": "string"}}, "required": ["plan"]}},
-        ]
 
     def list_all(self) -> str:
         if not self.config["members"]:
@@ -380,105 +426,98 @@ def _check_shutdown_status(request_id: str) -> str:
 
 # -- Lead tool dispatch (12 tools) --
 TOOL_HANDLERS = {
-    "bash":              lambda **kw: _run_bash(kw["command"]),
-    "read_file":         lambda **kw: _run_read(kw["path"], kw.get("limit")),
-    "write_file":        lambda **kw: _run_write(kw["path"], kw["content"]),
-    "edit_file":         lambda **kw: _run_edit(kw["path"], kw["old_text"], kw["new_text"]),
-    "spawn_teammate":    lambda **kw: TEAM.spawn(kw["name"], kw["role"], kw["prompt"]),
-    "list_teammates":    lambda **kw: TEAM.list_all(),
-    "send_message":      lambda **kw: BUS.send("lead", kw["to"], kw["content"], kw.get("msg_type", "message")),
-    "read_inbox":        lambda **kw: json.dumps(BUS.read_inbox("lead"), indent=2),
-    "broadcast":         lambda **kw: BUS.broadcast("lead", kw["content"], TEAM.member_names()),
-    "shutdown_request":  lambda **kw: handle_shutdown_request(kw["teammate"]),
+    "bash": lambda **kw: _run_bash(kw["command"]),
+    "read_file": lambda **kw: _run_read(kw["path"], kw.get("limit")),
+    "write_file": lambda **kw: _run_write(kw["path"], kw["content"]),
+    "edit_file": lambda **kw: _run_edit(kw["path"], kw["old_text"], kw["new_text"]),
+    "spawn_teammate": lambda **kw: TEAM.spawn(kw["name"], kw["role"], kw["prompt"]),
+    "list_teammates": lambda **kw: TEAM.list_all(),
+    "send_message": lambda **kw: BUS.send("lead", kw["to"], kw["content"], kw.get("msg_type", "message")),
+    "read_inbox": lambda **kw: json.dumps(BUS.read_inbox("lead"), indent=2),
+    "broadcast": lambda **kw: BUS.broadcast("lead", kw["content"], TEAM.member_names()),
+    "shutdown_request": lambda **kw: handle_shutdown_request(kw["teammate"]),
     "shutdown_response": lambda **kw: _check_shutdown_status(kw.get("request_id", "")),
-    "plan_approval":     lambda **kw: handle_plan_review(kw["request_id"], kw["approve"], kw.get("feedback", "")),
+    "plan_approval": lambda **kw: handle_plan_review(kw["request_id"], kw["approve"], kw.get("feedback", "")),
 }
-
-# these base tools are unchanged from s02
-TOOLS = [
-    {"name": "bash", "description": "Run a shell command.",
-     "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
-    {"name": "read_file", "description": "Read file contents.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["path"]}},
-    {"name": "write_file", "description": "Write content to file.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
-    {"name": "edit_file", "description": "Replace exact text in file.",
-     "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
-    {"name": "spawn_teammate", "description": "Spawn a persistent teammate.",
-     "input_schema": {"type": "object", "properties": {"name": {"type": "string"}, "role": {"type": "string"}, "prompt": {"type": "string"}}, "required": ["name", "role", "prompt"]}},
-    {"name": "list_teammates", "description": "List all teammates.",
-     "input_schema": {"type": "object", "properties": {}}},
-    {"name": "send_message", "description": "Send a message to a teammate.",
-     "input_schema": {"type": "object", "properties": {"to": {"type": "string"}, "content": {"type": "string"}, "msg_type": {"type": "string", "enum": list(VALID_MSG_TYPES)}}, "required": ["to", "content"]}},
-    {"name": "read_inbox", "description": "Read and drain the lead's inbox.",
-     "input_schema": {"type": "object", "properties": {}}},
-    {"name": "broadcast", "description": "Send a message to all teammates.",
-     "input_schema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
-    {"name": "shutdown_request", "description": "Request a teammate to shut down gracefully. Returns a request_id for tracking.",
-     "input_schema": {"type": "object", "properties": {"teammate": {"type": "string"}}, "required": ["teammate"]}},
-    {"name": "shutdown_response", "description": "Check the status of a shutdown request by request_id.",
-     "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}}, "required": ["request_id"]}},
-    {"name": "plan_approval", "description": "Approve or reject a teammate's plan. Provide request_id + approve + optional feedback.",
-     "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}, "approve": {"type": "boolean"}, "feedback": {"type": "string"}}, "required": ["request_id", "approve"]}},
-]
 
 
 def agent_loop(messages: list):
+    """
+    OpenAI 版本的循环逻辑，现在使用与 Anthropic 版本相同的 Handler 模式
+    """
+    # 这里的 SYSTEM 应该作为列表的第一条消息或在 chat.completions 中处理
+    # 为了保持上下文连续性，如果 messages 为空，先插入 system
+    if not any(m["role"] == "system" for m in messages):
+        messages.insert(0, {"role": "system", "content": SYSTEM})
+
     while True:
+        # 1. 检查收件箱
         inbox = BUS.read_inbox("lead")
         if inbox:
             messages.append({
                 "role": "user",
                 "content": f"<inbox>{json.dumps(inbox, indent=2)}</inbox>",
             })
-        response = client.messages.create(
+
+        # 2. 调用模型
+        response = client.chat.completions.create(
             model=MODEL,
-            system=SYSTEM,
             messages=messages,
-            tools=TOOLS,
-            max_tokens=8000,
+            tools=TEAM._get_openai_tools(is_lead=True),  # 确保此方法返回完整的 12 个工具定义
         )
-        messages.append({"role": "assistant", "content": response.content})
-        if response.stop_reason != "tool_use":
+
+        choice = response.choices[0]
+        msg = choice.message
+        messages.append(msg)  # OpenAI 要求必须将包含 tool_calls 的 assistant 消息存入历史
+
+        # 3. 如果模型不需要调用工具，退出循环
+        if choice.finish_reason != "tool_calls":
             return
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                handler = TOOL_HANDLERS.get(block.name)
-                try:
-                    output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                except Exception as e:
-                    output = f"Error: {e}"
-                print(f"> {block.name}:")
-                print(str(output)[:200])
-                results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": str(output),
-                })
-        messages.append({"role": "user", "content": results})
+
+        # 4. 处理工具调用 (与 Anthropic 逻辑一致)
+        for tool_call in msg.tool_calls:
+            tool_name = tool_call.function.name
+            try:
+                args = json.loads(tool_call.function.arguments)
+            except Exception:
+                args = {}
+
+            # 使用统一的 TOOL_HANDLERS
+            handler = TOOL_HANDLERS.get(tool_name)
+            try:
+                output = handler(**args) if handler else f"Unknown tool: {tool_name}"
+            except Exception as e:
+                output = f"Error: {e}"
+
+            # 保持一致的打印格式
+            print(f"> {tool_name}:")
+            print(str(output)[:200])
+
+            # 将结果添加回消息历史
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": tool_name,
+                "content": str(output),
+            })
 
 
 if __name__ == "__main__":
     history = []
+    print("OpenAI Team Control Shell (s10)")
     while True:
         try:
-            query = input("\033[36ms10 >> \033[0m")
-        except (EOFError, KeyboardInterrupt):
+            query = input("\033[32ms10_openai >> \033[0m").strip()
+            if query.lower() in ("q", "exit", ""):
+                break
+            if query == "/team":
+                print(TEAM.list_all())
+                continue
+            if query == "/inbox":
+                print(json.dumps(BUS.read_inbox("lead"), indent=2))
+                continue
+
+            history.append({"role": "user", "content": query})
+            agent_loop(history)
+        except KeyboardInterrupt:
             break
-        if query.strip().lower() in ("q", "exit", ""):
-            break
-        if query.strip() == "/team":
-            print(TEAM.list_all())
-            continue
-        if query.strip() == "/inbox":
-            print(json.dumps(BUS.read_inbox("lead"), indent=2))
-            continue
-        history.append({"role": "user", "content": query})
-        agent_loop(history)
-        response_content = history[-1]["content"]
-        if isinstance(response_content, list):
-            for block in response_content:
-                if hasattr(block, "text"):
-                    print(block.text)
-        print()
