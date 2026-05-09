@@ -269,7 +269,6 @@ def auto_compact(messages: list) -> list:
     ]
 
 
-
 # === SECTION: file_tasks (s07) ===
 class TaskManager:
     def __init__(self):
@@ -643,14 +642,14 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"type": "object",
                                                                                             "properties": {"content": {
                                                                                                 "type": "string"},
-                                                                                                           "status": {
-                                                                                                               "type": "string",
-                                                                                                               "enum": [
-                                                                                                                   "pending",
-                                                                                                                   "in_progress",
-                                                                                                                   "completed"]},
-                                                                                                           "activeForm": {
-                                                                                                               "type": "string"}},
+                                                                                                "status": {
+                                                                                                    "type": "string",
+                                                                                                    "enum": [
+                                                                                                        "pending",
+                                                                                                        "in_progress",
+                                                                                                        "completed"]},
+                                                                                                "activeForm": {
+                                                                                                    "type": "string"}},
                                                                                             "required": ["content",
                                                                                                          "status",
                                                                                                          "activeForm"]}}},
