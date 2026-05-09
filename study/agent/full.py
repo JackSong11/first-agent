@@ -46,16 +46,19 @@ import uuid
 from pathlib import Path
 from queue import Queue
 
-from anthropic import Anthropic
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
-if os.getenv("ANTHROPIC_BASE_URL"):
-    os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
 WORKDIR = Path.cwd()
-client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-MODEL = os.environ["MODEL_ID"]
+# 初始化 OpenAI 客户端
+# 注意：如果你使用第三方转发或本地模型，可以通过 base_url 和 api_key 配置
+client = OpenAI(
+    api_key=os.environ.get("LLM_API_KEY"),
+    base_url=os.environ.get("LLM_BASE_URL"),
+)
+MODEL = os.environ["LLM_MODEL_ID"]
 
 TEAM_DIR = WORKDIR / ".team"
 INBOX_DIR = TEAM_DIR / "inbox"
@@ -160,16 +163,32 @@ class TodoManager:
         return any(item.get("status") != "completed" for item in self.items)
 
 
+# === Helper: convert tool schema from Anthropic format to OpenAI format ===
+def to_openai_tools(anthropic_tools: list) -> list:
+    """Convert Anthropic-style tool defs to OpenAI function-calling format."""
+    openai_tools = []
+    for t in anthropic_tools:
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {"type": "object", "properties": {}}),
+            }
+        })
+    return openai_tools
+
+
 # === SECTION: subagent (s04) ===
 def run_subagent(prompt: str, agent_type: str = "Explore") -> str:
-    sub_tools = [
+    sub_tools_raw = [
         {"name": "bash", "description": "Run command.",
          "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
         {"name": "read_file", "description": "Read file.",
          "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
     ]
     if agent_type != "Explore":
-        sub_tools += [
+        sub_tools_raw += [
             {"name": "write_file", "description": "Write file.",
              "input_schema": {"type": "object",
                               "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
@@ -180,6 +199,7 @@ def run_subagent(prompt: str, agent_type: str = "Explore") -> str:
                                              "new_text": {"type": "string"}},
                               "required": ["path", "old_text", "new_text"]}},
         ]
+    sub_tools = to_openai_tools(sub_tools_raw)
     sub_handlers = {
         "bash": lambda **kw: run_bash(kw["command"]),
         "read_file": lambda **kw: run_read(kw["path"]),
@@ -187,20 +207,25 @@ def run_subagent(prompt: str, agent_type: str = "Explore") -> str:
         "edit_file": lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
     }
     sub_msgs = [{"role": "user", "content": prompt}]
-    resp = None
+    last_message = None
     for _ in range(30):
-        resp = client.messages.create(model=MODEL, messages=sub_msgs, tools=sub_tools, max_tokens=8000)
-        sub_msgs.append({"role": "assistant", "content": resp.content})
-        if resp.stop_reason != "tool_use":
+        resp = client.chat.completions.create(
+            model=MODEL, messages=sub_msgs, tools=sub_tools, max_tokens=8000)
+        choice = resp.choices[0]
+        last_message = choice.message
+        sub_msgs.append(last_message)
+        if choice.finish_reason != "tool_calls":
             break
-        results = []
-        for b in resp.content:
-            if b.type == "tool_use":
-                h = sub_handlers.get(b.name, lambda **kw: "Unknown tool")
-                results.append({"type": "tool_result", "tool_use_id": b.id, "content": str(h(**b.input))[:50000]})
-        sub_msgs.append({"role": "user", "content": results})
-    if resp:
-        return "".join(b.text for b in resp.content if hasattr(b, "text")) or "(no summary)"
+        if not last_message.tool_calls:
+            break
+        for tc in last_message.tool_calls:
+            fn_name = tc.function.name
+            fn_args = json.loads(tc.function.arguments)
+            h = sub_handlers.get(fn_name, lambda **kw: "Unknown tool")
+            output = str(h(**fn_args))[:50000]
+            sub_msgs.append({"role": "tool", "tool_call_id": tc.id, "content": output})
+    if last_message and last_message.content:
+        return last_message.content
     return "(subagent failed)"
 
 
@@ -238,17 +263,16 @@ def estimate_tokens(messages: list) -> int:
 
 
 def microcompact(messages: list):
-    indices = []
+    """Clear old tool results to save tokens."""
+    tool_msgs = []
     for i, msg in enumerate(messages):
-        if msg["role"] == "user" and isinstance(msg.get("content"), list):
-            for part in msg["content"]:
-                if isinstance(part, dict) and part.get("type") == "tool_result":
-                    indices.append(part)
-    if len(indices) <= 3:
+        if msg.get("role") == "tool":
+            tool_msgs.append(msg)
+    if len(tool_msgs) <= 3:
         return
-    for part in indices[:-3]:
-        if isinstance(part.get("content"), str) and len(part["content"]) > 100:
-            part["content"] = "[cleared]"
+    for msg in tool_msgs[:-3]:
+        if isinstance(msg.get("content"), str) and len(msg["content"]) > 100:
+            msg["content"] = "[cleared]"
 
 
 def auto_compact(messages: list) -> list:
@@ -258,12 +282,12 @@ def auto_compact(messages: list) -> list:
         for msg in messages:
             f.write(json.dumps(msg, default=str) + "\n")
     conv_text = json.dumps(messages, default=str)[-80000:]
-    resp = client.messages.create(
+    resp = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": f"Summarize for continuity:\n{conv_text}"}],
         max_tokens=2000,
     )
-    summary = resp.content[0].text
+    summary = resp.choices[0].message.content
     return [
         {"role": "user", "content": f"[Compressed. Transcript: {path}]\n{summary}"},
     ]
@@ -453,8 +477,11 @@ class TeammateManager:
         team_name = self.config["team_name"]
         sys_prompt = (f"You are '{name}', role: {role}, team: {team_name}, at {WORKDIR}. "
                       f"Use idle when done with current work. You may auto-claim tasks.")
-        messages = [{"role": "user", "content": prompt}]
-        tools = [
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        tools_raw = [
             {"name": "bash", "description": "Run command.",
              "input_schema": {"type": "object", "properties": {"command": {"type": "string"}},
                               "required": ["command"]}},
@@ -475,6 +502,7 @@ class TeammateManager:
              "input_schema": {"type": "object", "properties": {"task_id": {"type": "integer"}},
                               "required": ["task_id"]}},
         ]
+        tools = to_openai_tools(tools_raw)
         while True:
             # -- WORK PHASE --
             for _ in range(50):
@@ -485,35 +513,38 @@ class TeammateManager:
                         return
                     messages.append({"role": "user", "content": json.dumps(msg)})
                 try:
-                    response = client.messages.create(
-                        model=MODEL, system=sys_prompt, messages=messages,
+                    response = client.chat.completions.create(
+                        model=MODEL, messages=messages,
                         tools=tools, max_tokens=8000)
                 except Exception:
                     self._set_status(name, "shutdown")
                     return
-                messages.append({"role": "assistant", "content": response.content})
-                if response.stop_reason != "tool_use":
+                choice = response.choices[0]
+                assistant_msg = choice.message
+                messages.append(assistant_msg)
+                if choice.finish_reason != "tool_calls":
                     break
-                results = []
+                if not assistant_msg.tool_calls:
+                    break
                 idle_requested = False
-                for block in response.content:
-                    if block.type == "tool_use":
-                        if block.name == "idle":
-                            idle_requested = True
-                            output = "Entering idle phase."
-                        elif block.name == "claim_task":
-                            output = self.task_mgr.claim(block.input["task_id"], name)
-                        elif block.name == "send_message":
-                            output = self.bus.send(name, block.input["to"], block.input["content"])
-                        else:
-                            dispatch = {"bash": lambda **kw: run_bash(kw["command"]),
-                                        "read_file": lambda **kw: run_read(kw["path"]),
-                                        "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
-                                        "edit_file": lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"])}
-                            output = dispatch.get(block.name, lambda **kw: "Unknown")(**block.input)
-                        print(f"  [{name}] {block.name}: {str(output)[:120]}")
-                        results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
-                messages.append({"role": "user", "content": results})
+                for tc in assistant_msg.tool_calls:
+                    fn_name = tc.function.name
+                    fn_args = json.loads(tc.function.arguments)
+                    if fn_name == "idle":
+                        idle_requested = True
+                        output = "Entering idle phase."
+                    elif fn_name == "claim_task":
+                        output = self.task_mgr.claim(fn_args["task_id"], name)
+                    elif fn_name == "send_message":
+                        output = self.bus.send(name, fn_args["to"], fn_args["content"])
+                    else:
+                        dispatch = {"bash": lambda **kw: run_bash(kw["command"]),
+                                    "read_file": lambda **kw: run_read(kw["path"]),
+                                    "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
+                                    "edit_file": lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"])}
+                        output = dispatch.get(fn_name, lambda **kw: "Unknown")(**fn_args)
+                    print(f"  [{name}] {fn_name}: {str(output)[:120]}")
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": str(output)})
                 if idle_requested:
                     break
             # -- IDLE PHASE: poll for messages and unclaimed tasks --
@@ -538,14 +569,8 @@ class TeammateManager:
                 if unclaimed:
                     task = unclaimed[0]
                     self.task_mgr.claim(task["id"], name)
-                    # Identity re-injection for compressed contexts
-                    if len(messages) <= 3:
-                        messages.insert(0, {"role": "user", "content":
-                            f"<identity>You are '{name}', role: {role}, team: {team_name}.</identity>"})
-                        messages.insert(1, {"role": "assistant", "content": f"I am {name}. Continuing."})
                     messages.append({"role": "user", "content":
                         f"<auto-claimed>Task #{task['id']}: {task['subject']}\n{task.get('description', '')}</auto-claimed>"})
-                    messages.append({"role": "assistant", "content": f"Claimed task #{task['id']}. Working on it."})
                     resume = True
                     break
             if not resume:
@@ -625,7 +650,7 @@ TOOL_HANDLERS = {
     "claim_task": lambda **kw: TASK_MGR.claim(kw["task_id"], "lead"),
 }
 
-TOOLS = [
+TOOLS_RAW = [
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
     {"name": "read_file", "description": "Read file contents.",
@@ -713,6 +738,9 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
 ]
 
+# Convert to OpenAI format
+TOOLS = to_openai_tools(TOOLS_RAW)
+
 
 # === SECTION: agent_loop ===
 def agent_loop(messages: list):
@@ -733,36 +761,41 @@ def agent_loop(messages: list):
         if inbox:
             messages.append({"role": "user", "content": f"<inbox>{json.dumps(inbox, indent=2)}</inbox>"})
         # LLM call
-        response = client.messages.create(
-            model=MODEL, system=SYSTEM, messages=messages,
-            tools=TOOLS, max_tokens=8000,
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "system", "content": SYSTEM}] + messages,
+            tools=TOOLS,
+            max_tokens=8000,
         )
-        messages.append({"role": "assistant", "content": response.content})
-        if response.stop_reason != "tool_use":
+        choice = response.choices[0]
+        assistant_msg = choice.message
+        messages.append(assistant_msg)
+        if choice.finish_reason != "tool_calls":
+            return
+        if not assistant_msg.tool_calls:
             return
         # Tool execution
-        results = []
         used_todo = False
         manual_compress = False
-        for block in response.content:
-            if block.type == "tool_use":
-                if block.name == "compress":
-                    manual_compress = True
-                handler = TOOL_HANDLERS.get(block.name)
-                try:
-                    output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                except Exception as e:
-                    output = f"Error: {e}"
-                print(f"> {block.name}:")
-                print(str(output)[:200])
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
-                if block.name == "TodoWrite":
-                    used_todo = True
+        for tc in assistant_msg.tool_calls:
+            fn_name = tc.function.name
+            fn_args = json.loads(tc.function.arguments)
+            if fn_name == "compress":
+                manual_compress = True
+            handler = TOOL_HANDLERS.get(fn_name)
+            try:
+                output = handler(**fn_args) if handler else f"Unknown tool: {fn_name}"
+            except Exception as e:
+                output = f"Error: {e}"
+            print(f"> {fn_name}:")
+            print(str(output)[:200])
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": str(output)})
+            if fn_name == "TodoWrite":
+                used_todo = True
         # s03: nag reminder (only when todo workflow is active)
         rounds_without_todo = 0 if used_todo else rounds_without_todo + 1
         if TODO.has_open_items() and rounds_without_todo >= 3:
-            results.append({"type": "text", "text": "<reminder>Update your todos.</reminder>"})
-        messages.append({"role": "user", "content": results})
+            messages.append({"role": "user", "content": "<reminder>Update your todos.</reminder>"})
         # s06: manual compress
         if manual_compress:
             print("[manual compact]")
@@ -796,9 +829,10 @@ if __name__ == "__main__":
             continue
         history.append({"role": "user", "content": query})
         agent_loop(history)
-        response_content = history[-1]["content"]
-        if isinstance(response_content, list):
-            for block in response_content:
-                if hasattr(block, "text"):
-                    print(block.text)
+        last = history[-1]
+        # OpenAI returns message objects; extract content
+        if hasattr(last, "content") and last.content:
+            print(last.content)
+        elif isinstance(last, dict) and last.get("content"):
+            print(last["content"])
         print()
